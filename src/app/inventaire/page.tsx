@@ -748,7 +748,7 @@ export default function InventairePage() {
 
                               {/* Lot Column */}
                               <td className="py-3.5 px-4 text-slate-700 font-normal">
-                                {l.isNoLot ? (
+                                {'isNoLot' in l && l.isNoLot ? (
                                   <span className="text-slate-400 italic">Lot unique</span>
                                 ) : (
                                   `Lot ${l.index} — ${

@@ -13,13 +13,42 @@ import {
   Trophy,
   CheckCircle2,
   Calendar,
+  Filter,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/card';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 
+const formatDateInput = (date: Date) => {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+};
+
+const getPresetDates = (preset: 'jour' | 'semaine' | 'mois') => {
+  const now = new Date();
+  const todayStr = formatDateInput(now);
+
+  if (preset === 'jour') {
+    return { start: todayStr, end: todayStr };
+  } else if (preset === 'semaine') {
+    const dayOfWeek = now.getDay() || 7;
+    const monday = new Date(now);
+    monday.setDate(now.getDate() - (dayOfWeek - 1));
+    return { start: formatDateInput(monday), end: todayStr };
+  } else {
+    // mois
+    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+    return { start: formatDateInput(firstDay), end: todayStr };
+  }
+};
+
 export default function DashboardPage() {
-  const [periode, setPeriode] = useState<'jour' | 'semaine' | 'mois'>('jour');
+  const [modePeriode, setModePeriode] = useState<'jour' | 'semaine' | 'mois' | 'custom'>('jour');
+  const [dateDebut, setDateDebut] = useState<string>(() => getPresetDates('jour').start);
+  const [dateFin, setDateFin] = useState<string>(() => getPresetDates('jour').end);
+
   const [caTotal, setCaTotal] = useState<number>(0);
   const [alertes, setAlertes] = useState<any[]>([]);
   const [topProduits, setTopProduits] = useState<any[]>([]);
@@ -30,17 +59,33 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchDashboardData();
-  }, [periode]);
+    fetchDashboardData(dateDebut, dateFin, modePeriode);
+  }, []);
 
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = async (
+    start = dateDebut,
+    end = dateFin,
+    mode = modePeriode
+  ) => {
     setLoading(true);
     try {
+      let caUrl = `/dashboard/chiffre-affaires?`;
+      let topUrl = `/dashboard/top-produits?`;
+      let ecartsUrl = `/dashboard/ecarts-inventaire?`;
+
+      if (start && end) {
+        caUrl += `date_debut=${start}&date_fin=${end}`;
+        topUrl += `date_debut=${start}&date_fin=${end}`;
+        ecartsUrl += `date_debut=${start}&date_fin=${end}`;
+      } else {
+        caUrl += `periode=${mode}`;
+      }
+
       const [caRes, alertesRes, topRes, ecartsRes, stockRes, catRes, lieuRes] = await Promise.all([
-        api.get(`/dashboard/chiffre-affaires?periode=${periode}`),
+        api.get(caUrl),
         api.get('/dashboard/alertes-stock-bas'),
-        api.get('/dashboard/top-produits'),
-        api.get('/dashboard/ecarts-inventaire'),
+        api.get(topUrl),
+        api.get(ecartsUrl),
         api.get('/dashboard/stock'),
         api.get('/categories'),
         api.get('/lieux-stock'),
@@ -58,6 +103,18 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handlePresetChange = (preset: 'jour' | 'semaine' | 'mois') => {
+    setModePeriode(preset);
+    const { start, end } = getPresetDates(preset);
+    setDateDebut(start);
+    setDateFin(end);
+    fetchDashboardData(start, end, preset);
+  };
+
+  const handleApplyFilter = () => {
+    fetchDashboardData(dateDebut, dateFin, modePeriode);
   };
 
   const totalValeurStock = stockSummary.reduce(
@@ -81,32 +138,91 @@ export default function DashboardPage() {
     return { id: l.id, nom: l.nom, totalQte, totalVal };
   });
 
+  const getPeriodeLabel = () => {
+    if (modePeriode === 'jour') return "Aujourd'hui";
+    if (modePeriode === 'semaine') return 'Cette Semaine';
+    if (modePeriode === 'mois') return 'Ce Mois';
+    return `Du ${dateDebut} au ${dateFin}`;
+  };
+
   return (
     <RoleGuard requireAdmin={true}>
       <div className="space-y-6">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        {/* Filter & Header Bar */}
+        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
           <div>
             <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
               <LayoutDashboard className="h-6 w-6 text-slate-700" />
               Tableau de Bord Admin
             </h1>
-            <p className="text-sm text-slate-500 mt-1">Vue d'ensemble des ventes, stocks et alertes</p>
+            <p className="text-sm text-slate-500 mt-1">
+              Vue d'ensemble des ventes, stocks et alertes par période
+            </p>
           </div>
 
-          <div className="flex items-center gap-1.5 bg-white p-1 rounded-lg border border-slate-200 shadow-xs">
-            {(['jour', 'semaine', 'mois'] as const).map((p) => (
+          <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
+            {/* Presets */}
+            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200">
+              {(['jour', 'semaine', 'mois'] as const).map((p) => (
+                <button
+                  key={p}
+                  onClick={() => handlePresetChange(p)}
+                  className={`px-3 py-1.5 rounded-md text-xs font-semibold capitalize transition ${
+                    modePeriode === p
+                      ? 'bg-slate-900 text-white shadow-xs'
+                      : 'text-slate-600 hover:bg-slate-200/60'
+                  }`}
+                >
+                  {p === 'jour' ? "Aujourd'hui" : p === 'semaine' ? 'Cette semaine' : 'Ce mois'}
+                </button>
+              ))}
               <button
-                key={p}
-                onClick={() => setPeriode(p)}
-                className={`px-3 py-1.5 rounded-md text-xs font-semibold capitalize transition ${
-                  periode === p
+                onClick={() => setModePeriode('custom')}
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition ${
+                  modePeriode === 'custom'
                     ? 'bg-slate-900 text-white shadow-xs'
-                    : 'text-slate-600 hover:bg-slate-100'
+                    : 'text-slate-600 hover:bg-slate-200/60'
                 }`}
               >
-                {p}
+                Personnalisé
               </button>
-            ))}
+            </div>
+
+            {/* Custom Dates & Filter Button */}
+            <div className="flex flex-wrap items-center gap-2 bg-slate-50 p-1.5 rounded-lg border border-slate-200 text-xs">
+              <Calendar className="h-4 w-4 text-slate-400 ml-1 hidden sm:block" />
+              <div className="flex items-center gap-1">
+                <span className="text-slate-500 font-medium">Du :</span>
+                <input
+                  type="date"
+                  value={dateDebut}
+                  onChange={(e) => {
+                    setDateDebut(e.target.value);
+                    setModePeriode('custom');
+                  }}
+                  className="bg-white border border-slate-300 rounded px-2 py-1 text-slate-900 text-xs focus:ring-1 focus:ring-slate-900 outline-hidden"
+                />
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="text-slate-500 font-medium">Au :</span>
+                <input
+                  type="date"
+                  value={dateFin}
+                  onChange={(e) => {
+                    setDateFin(e.target.value);
+                    setModePeriode('custom');
+                  }}
+                  className="bg-white border border-slate-300 rounded px-2 py-1 text-slate-900 text-xs focus:ring-1 focus:ring-slate-900 outline-hidden"
+                />
+              </div>
+              <Button
+                onClick={handleApplyFilter}
+                className="bg-slate-900 hover:bg-slate-800 text-white px-3 py-1 h-7 text-xs flex items-center gap-1"
+              >
+                <Filter className="h-3 w-3" />
+                Filtrer
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -116,7 +232,7 @@ export default function DashboardPage() {
             <CardContent className="p-6 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                  Chiffre d'Affaires ({periode})
+                  Chiffre d'Affaires ({getPeriodeLabel()})
                 </span>
                 <div className="p-2 bg-emerald-50 rounded-lg text-emerald-600">
                   <TrendingUp className="h-5 w-5" />
@@ -284,13 +400,13 @@ export default function DashboardPage() {
             <CardHeader className="pb-3 border-b border-slate-100">
               <CardTitle className="text-base font-semibold text-slate-900 flex items-center gap-2">
                 <Trophy className="h-4 w-4 text-amber-500" />
-                Top 10 Produits Vendus
+                Top 10 Produits Vendus ({getPeriodeLabel()})
               </CardTitle>
             </CardHeader>
             <CardContent className="pt-4">
               {topProduits.length === 0 ? (
                 <div className="text-sm text-slate-500 bg-slate-50 p-4 rounded-lg border border-slate-200/60">
-                  Aucune vente enregistrée pour le moment.
+                  Aucune vente enregistrée pour cette période.
                 </div>
               ) : (
                 <div className="space-y-2 max-h-[300px] overflow-y-auto">
@@ -321,13 +437,13 @@ export default function DashboardPage() {
           <CardHeader className="pb-3 border-b border-slate-100">
             <CardTitle className="text-base font-semibold text-slate-900 flex items-center gap-2">
               <AlertTriangle className="h-4 w-4 text-amber-500" />
-              Écarts d'Inventaire Récents
+              Écarts d'Inventaire ({getPeriodeLabel()})
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-4">
             {ecarts.length === 0 ? (
               <div className="text-sm text-slate-500 bg-slate-50 p-4 rounded-lg border border-slate-200/60">
-                Aucun écart d'inventaire détecté récemment.
+                Aucun écart d'inventaire détecté pour cette période.
               </div>
             ) : (
               <div className="border border-slate-200 rounded-lg overflow-hidden">
@@ -361,4 +477,3 @@ export default function DashboardPage() {
     </RoleGuard>
   );
 }
-
